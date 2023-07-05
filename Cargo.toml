@@ -1,0 +1,16 @@
+[package]
+name = "vinox-voxel-editor"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+ggez = { git = "https://github.com/vixeliz/ggez", branch = "devel" }
+mint = "0.5.9"
+vinox_voxel = { git = "https://github.com/vixeliz/vinox_voxel" }
+ggez_atlas = { git = "https://github.com/vixeliz/ggez_atlas" }
+ahash = "0.8.3"
+ggegui = "0.3.6"
+itertools = "0.11.0"
+
