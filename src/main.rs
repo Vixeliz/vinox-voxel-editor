@@ -1,3 +1,4 @@
+use ggez::conf::NumSamples;
 use ggez::graphics::{
     Camera3d, Canvas3d, DrawParam, DrawParam3d, ImageFormat, Mesh3d, Mesh3dBuilder, Rect, Sampler,
     Vertex3d,
@@ -15,14 +16,16 @@ use itertools::izip;
 use std::collections::HashMap;
 use std::{env, path};
 use vinox_voxel::prelude::*;
+use vinox_voxel_formats::level::VoxelLevel;
 
 struct MainState {
     camera: Camera3d,
-    meshes: Vec<(Mesh3d, Vec3, Vec3)>,
     psx: bool,
     psx_shader: Shader,
     custom_shader: Shader,
     texture_atlas: TextureAtlas<String>,
+    level: VoxelLevel,
+    chunk_meshes: Vec<(Mesh3d, UVec3)>,
 }
 
 impl MainState {
@@ -60,39 +63,7 @@ impl MainState {
             },
         );
 
-        let mut chunk = ChunkData::<BlockData, BlockRegistry>::default();
-        for y in 0..3 {
-            for x in 0..CHUNK_SIZE {
-                for z in 0..CHUNK_SIZE {
-                    if y == 0 {
-                        chunk.set(
-                            RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                            BlockData::new("vinox".to_string(), "test".to_string()),
-                        );
-                    }
-                    if y == 2 && x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
-                        chunk.set(
-                            RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                            BlockData::new("vinox".to_string(), "test".to_string()),
-                        );
-                        continue;
-                    }
-                    if y == 1 && x < CHUNK_SIZE - 2 && z < CHUNK_SIZE - 2 && x > 1 && z > 1 {
-                        chunk.set(
-                            RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                            BlockData::new("vinox".to_string(), "slab".to_string()),
-                        );
-                        continue;
-                    }
-                    if x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
-                        chunk.set(
-                            RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                            BlockData::new("vinox".to_string(), "test".to_string()),
-                        );
-                    }
-                }
-            }
-        }
+        // let mut chunk = ChunkData::<BlockData, BlockRegistry>::default();
 
         let mut geo_table = GeometryRegistry(HashMap::default());
         geo_table.insert("vinox:block".to_string(), Geometry::default());
@@ -219,43 +190,88 @@ impl MainState {
             },
         };
 
-        // asset_registry.texture_uvs;
-
-        let mesh = full_mesh(
-            &asset_registry,
-            &ChunkBoundary::<BlockData, BlockRegistry>::new(
-                chunk,
-                Box::default(),
-                &registry,
-                &geo_table,
+        let mut level = VoxelLevel::new(UVec3::new(8, 6, 8));
+        let mut chunk_meshes = Vec::new();
+        // // asset_registry.texture_uvs;
+        for chunk in level.loaded_chunks.as_mut().unwrap() {
+            for y in 0..3 {
+                for x in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        if y == 0 {
+                            chunk.set(
+                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                BlockData::new("vinox".to_string(), "test".to_string()),
+                            );
+                        }
+                        if y == 2 && x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1
+                        {
+                            chunk.set(
+                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                BlockData::new("vinox".to_string(), "test".to_string()),
+                            );
+                            continue;
+                        }
+                        if y == 1 && x < CHUNK_SIZE - 2 && z < CHUNK_SIZE - 2 && x > 1 && z > 1 {
+                            chunk.set(
+                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                BlockData::new("vinox".to_string(), "slab".to_string()),
+                            );
+                            continue;
+                        }
+                        if x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
+                            chunk.set(
+                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                BlockData::new("vinox".to_string(), "test".to_string()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        for (idx, chunk) in level.loaded_chunks.as_ref().unwrap().iter().enumerate() {
+            let mesh = full_mesh(
                 &asset_registry,
-            ),
-            IVec3::new(0, 0, 0).into(),
-        );
+                &ChunkBoundary::<BlockData, BlockRegistry>::new(
+                    chunk.clone(),
+                    Default::default(),
+                    &registry,
+                    &geo_table,
+                    &asset_registry,
+                ),
+                IVec3::new(0, 0, 0).into(),
+            );
 
-        let vertices = izip!(
-            mesh.chunk_mesh.vertices,
-            mesh.chunk_mesh.colors.unwrap(),
-            mesh.chunk_mesh.uvs.unwrap(),
-            mesh.chunk_mesh.normals
-        )
-        .map(|(pos, colors, uvs, normals)| {
-            Vertex3d::new(
-                mint::Vector3::from(pos),
-                Vec2::from(uvs),
-                Color::new(colors[0], colors[1], colors[2], colors[3]),
-                mint::Vector3::from(normals),
+            let vertices = izip!(
+                mesh.chunk_mesh.vertices,
+                mesh.chunk_mesh.colors.unwrap(),
+                mesh.chunk_mesh.uvs.unwrap(),
+                mesh.chunk_mesh.normals
             )
-        })
-        .collect();
+            .map(|(pos, colors, uvs, normals)| {
+                Vertex3d::new(
+                    mint::Vector3::from(pos),
+                    Vec2::from(uvs),
+                    Color::new(colors[0], colors[1], colors[2], colors[3]),
+                    mint::Vector3::from(normals),
+                )
+            })
+            .collect();
 
-        let mesh = Mesh3dBuilder::new()
-            .from_data(
-                vertices,
-                mesh.chunk_mesh.indices,
-                Some(texture_atlas.image.clone()),
-            )
-            .build(ctx);
+            chunk_meshes.push((
+                Mesh3dBuilder::new()
+                    .from_data(
+                        vertices,
+                        mesh.chunk_mesh.indices,
+                        Some(texture_atlas.image.clone()),
+                    )
+                    .build(ctx),
+                level.delinearize(idx).into(),
+            ));
+        }
+
+        level.block_registry = registry;
+        level.geometry_registry = geo_table;
+        level.asset_registry = asset_registry;
 
         camera.transform.yaw = 0.0;
         camera.transform.pitch = 0.0;
@@ -265,7 +281,7 @@ impl MainState {
 
         Ok(MainState {
             camera,
-            meshes: vec![(mesh, Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 0.0, 0.0))],
+            // meshes: vec![(mesh, Vec3::new(1.0, 1.0, 1.0), Vec3::new(0.0, 0.0, 0.0))],
             custom_shader: graphics::ShaderBuilder::from_path("/fancy.wgsl")
                 .build(&ctx.gfx)
                 .unwrap(),
@@ -274,6 +290,8 @@ impl MainState {
                 .unwrap(),
             psx: true,
             texture_atlas,
+            chunk_meshes,
+            level,
         })
     }
 }
@@ -283,20 +301,75 @@ impl event::EventHandler for MainState {
         self.camera.projection.resize(width as u32, height as u32);
         Ok(())
     }
+    // fn quit_event(&mut self, _ctx: &mut Context) -> Result<bool, ggez::GameError> {
+    //     Ok(true)
+    // }
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         // set_cursor_hidden(ctx, true);
         // set_cursor_grabbed(ctx, true)?;
         let k_ctx = &ctx.keyboard.clone();
         let (yaw_sin, yaw_cos) = self.camera.transform.yaw.sin_cos();
+        let (pitch_sin, pitch_cos) = self.camera.transform.pitch.sin_cos();
         let dt = ctx.time.delta().as_secs_f32();
         let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize() * 25.0 * dt;
         let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize() * 25.0 * dt;
+        if k_ctx.is_key_just_pressed(KeyCode::R) {
+            if let Some((voxel_pos, _, _)) = self.level.raycast(
+                self.camera.transform.position,
+                Vec3::new(yaw_cos, pitch_sin, yaw_sin),
+                16.0,
+            ) {
+                let vox_pos = Vec3::from(mint::Vector3::<f32>::from(voxel_pos)).as_uvec3();
+                self.level.set_voxel(vox_pos, BlockData::default());
+                let chunk_pos = UVec3::new(
+                    (vox_pos.x as f32 / (CHUNK_SIZE as f32)).floor() as u32,
+                    (vox_pos.y as f32 / (CHUNK_SIZE as f32)).floor() as u32,
+                    (vox_pos.z as f32 / (CHUNK_SIZE as f32)).floor() as u32,
+                );
 
-        if k_ctx.is_key_pressed(KeyCode::Q) {
-            self.meshes[0].1 += 1.0 * dt;
-        }
-        if k_ctx.is_key_pressed(KeyCode::E) {
-            self.meshes[0].1 -= 1.0 * dt;
+                if let Some(chunk) = self.level.get_chunk(chunk_pos) {
+                    let mesh = full_mesh(
+                        &self.level.asset_registry,
+                        &ChunkBoundary::<BlockData, BlockRegistry>::new(
+                            chunk.clone(),
+                            Default::default(),
+                            &self.level.block_registry,
+                            &self.level.geometry_registry,
+                            &self.level.asset_registry,
+                        ),
+                        IVec3::new(0, 0, 0).into(),
+                    );
+
+                    let vertices = izip!(
+                        mesh.chunk_mesh.vertices,
+                        mesh.chunk_mesh.colors.unwrap(),
+                        mesh.chunk_mesh.uvs.unwrap(),
+                        mesh.chunk_mesh.normals
+                    )
+                    .map(|(pos, colors, uvs, normals)| {
+                        Vertex3d::new(
+                            mint::Vector3::from(pos),
+                            Vec2::from(uvs),
+                            Color::new(colors[0], colors[1], colors[2], colors[3]),
+                            mint::Vector3::from(normals),
+                        )
+                    })
+                    .collect();
+
+                    let idx = self.level.linearize(chunk_pos);
+
+                    self.chunk_meshes[idx as usize] = (
+                        Mesh3dBuilder::new()
+                            .from_data(
+                                vertices,
+                                mesh.chunk_mesh.indices,
+                                Some(self.texture_atlas.image.clone()),
+                            )
+                            .build(ctx),
+                        chunk_pos.into(),
+                    );
+                }
+            }
         }
         if k_ctx.is_key_pressed(KeyCode::Space) {
             self.camera.transform.position.y += 25.0 * dt;
@@ -332,12 +405,19 @@ impl event::EventHandler for MainState {
             self.camera.transform.pitch -= 1.0_f32.to_radians() * dt * 75.0;
         }
 
-        let mouse_delta = ctx.mouse.raw_delta();
-        let speed = 0.5;
-        let mouse_delta_y = mouse_delta.y as f32 * speed * dt * -1.0;
-        let mouse_delta_x = mouse_delta.x as f32 * speed * dt;
-        self.camera.transform.yaw += mouse_delta_x;
-        self.camera.transform.pitch += mouse_delta_y;
+        if k_ctx.is_key_just_pressed(KeyCode::Escape) {
+            ggez::input::mouse::set_cursor_hidden(ctx, !ctx.mouse.cursor_hidden());
+            ggez::input::mouse::set_cursor_grabbed(ctx, !ggez::input::mouse::cursor_grabbed(ctx))?;
+        }
+
+        if ctx.mouse.cursor_hidden() {
+            let mouse_delta = ctx.mouse.raw_delta();
+            let speed = 0.5;
+            let mouse_delta_y = mouse_delta.y as f32 * speed * dt * -1.0;
+            let mouse_delta_x = mouse_delta.x as f32 * speed * dt;
+            self.camera.transform.yaw += mouse_delta_x;
+            self.camera.transform.pitch += mouse_delta_y;
+        }
 
         Ok(())
     }
@@ -355,8 +435,11 @@ impl event::EventHandler for MainState {
         };
         canvas3d.set_projection(self.camera.to_matrix());
         canvas3d.set_sampler(Sampler::nearest_clamp());
-        for mesh in self.meshes.iter() {
-            canvas3d.draw(&mesh.0, DrawParam3d::default().scale(mesh.1));
+        for chunk_mesh in self.chunk_meshes.iter() {
+            canvas3d.draw(
+                &chunk_mesh.0,
+                DrawParam3d::default().position(chunk_mesh.1.as_vec3() * CHUNK_SIZE as f32),
+            );
         }
         canvas3d.finish(ctx)?;
         let mut canvas = graphics::Canvas::from_frame(ctx, None);
@@ -372,10 +455,12 @@ impl event::EventHandler for MainState {
         }
         let dest_point1 = Vec2::new(10.0, 210.0);
         let dest_point2 = Vec2::new(10.0, 250.0);
+
         canvas.draw(
-            &graphics::Text::new("You can mix 3d and 2d drawing;"),
+            &graphics::Text::new(format!("{}", ctx.time.fps())),
             dest_point1,
         );
+
         canvas.draw(&self.texture_atlas.image, dest_point2);
 
         canvas.finish(ctx)?;
@@ -395,6 +480,13 @@ pub fn main() -> GameResult {
 
     let cb = ggez::ContextBuilder::new("cube", "ggez")
         .window_mode(ggez::conf::WindowMode::default().resizable(true))
+        .window_setup(ggez::conf::WindowSetup {
+            title: "Vinox Editor".to_owned(),
+            samples: NumSamples::One,
+            vsync: false,
+            icon: "".to_owned(),
+            srgb: true,
+        })
         .add_resource_path(resource_dir);
 
     let (mut ctx, events_loop) = cb.build()?;
