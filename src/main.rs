@@ -529,8 +529,7 @@ impl event::EventHandler for MainState {
                 frustum.intersects_obb(
                     &Aabb {
                         center: (Vec3::from(x.center)).into(),
-                        // half_extents: x.half_extents,
-                        half_extents: Vec3::ONE.into(),
+                        half_extents: x.half_extents,
                     },
                     &Mat4::from(param.transform.to_bare_matrix()),
                 )
