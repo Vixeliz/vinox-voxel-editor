@@ -117,6 +117,17 @@ impl MainState {
 
         let texture_atlas = tb.build(ctx)?;
 
+        // registry.0.insert(
+        //     "vinox:air".to_string(),
+        //     Block {
+        //         identifier: "vinox:air".to_string(),
+        //         textures: None,
+        //         geometry: Some(BlockGeometry::Block),
+        //         auto_geo: None,
+        //         visibility: Some(VoxelVisibility::Empty),
+        //         has_item: None,
+        //     },
+        // );
         registry.0.insert(
             "vinox:test".to_string(),
             Block {
@@ -267,39 +278,47 @@ impl MainState {
             },
         };
 
-        let mut level = VoxelLevel::new(UVec3::new(8, 6, 8));
+        let mut level = VoxelLevel::new(UVec3::new(12, 6, 12));
         let mut chunk_meshes = Vec::new();
         // // asset_registry.texture_uvs;
-        for chunk in level.loaded_chunks.as_mut().unwrap() {
-            for y in 0..3 {
-                for x in 0..CHUNK_SIZE {
-                    for z in 0..CHUNK_SIZE {
-                        if y == 0 {
-                            chunk.set(
-                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                BlockData::new("vinox".to_string(), "test".to_string()),
-                            );
-                        }
-                        if y == 2 && x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1
-                        {
-                            chunk.set(
-                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                BlockData::new("vinox".to_string(), "test".to_string()),
-                            );
-                            continue;
-                        }
-                        if y == 1 && x < CHUNK_SIZE - 2 && z < CHUNK_SIZE - 2 && x > 1 && z > 1 {
-                            chunk.set(
-                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                BlockData::new("vinox".to_string(), "slab".to_string()),
-                            );
-                            continue;
-                        }
-                        if x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
-                            chunk.set(
-                                RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                BlockData::new("vinox".to_string(), "test".to_string()),
-                            );
+        let cloned = level.clone();
+        for (idx, chunk) in level.loaded_chunks.as_mut().unwrap().iter_mut().enumerate() {
+            let pos = cloned.delinearize(idx);
+            if pos.y == 0 {
+                for y in 0..3 {
+                    for x in 0..CHUNK_SIZE {
+                        for z in 0..CHUNK_SIZE {
+                            if y == 0 {
+                                chunk.set(
+                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                    BlockData::new("vinox".to_string(), "test".to_string()),
+                                );
+                            }
+                            if y == 2 && x == CHUNK_SIZE - 2
+                                || z == CHUNK_SIZE - 2
+                                || x == 1
+                                || z == 1
+                            {
+                                chunk.set(
+                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                    BlockData::new("vinox".to_string(), "test".to_string()),
+                                );
+                                continue;
+                            }
+                            if y == 1 && x < CHUNK_SIZE - 2 && z < CHUNK_SIZE - 2 && x > 1 && z > 1
+                            {
+                                chunk.set(
+                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                    BlockData::new("vinox".to_string(), "slab".to_string()),
+                                );
+                                continue;
+                            }
+                            if x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
+                                chunk.set(
+                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
+                                    BlockData::new("vinox".to_string(), "test".to_string()),
+                                );
+                            }
                         }
                     }
                 }
@@ -386,16 +405,23 @@ impl event::EventHandler for MainState {
         // set_cursor_grabbed(ctx, true)?;
         let k_ctx = &ctx.keyboard.clone();
         let (yaw_sin, yaw_cos) = self.camera.transform.yaw.sin_cos();
-        let (pitch_sin, pitch_cos) = self.camera.transform.pitch.sin_cos();
+        let (pitch_sin, _) = self.camera.transform.pitch.sin_cos();
         let dt = ctx.time.delta().as_secs_f32();
         let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize() * 25.0 * dt;
         let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize() * 25.0 * dt;
         if k_ctx.is_key_just_pressed(KeyCode::R) {
+            println!("Key pressed");
             if let Some((voxel_pos, _, _)) = self.level.raycast(
                 self.camera.transform.position,
                 Vec3::new(yaw_cos, pitch_sin, yaw_sin),
                 16.0,
             ) {
+                println!(
+                    "got voxel {}, {:?}",
+                    voxel_pos,
+                    self.level
+                        .get_voxel(IVec3::from(mint::Vector3::<i32>::from(voxel_pos)).as_uvec3())
+                );
                 let vox_pos = Vec3::from(mint::Vector3::<f32>::from(voxel_pos)).as_uvec3();
                 self.level.set_voxel(vox_pos, BlockData::default());
                 let chunk_pos = UVec3::new(
@@ -405,6 +431,7 @@ impl event::EventHandler for MainState {
                 );
 
                 if let Some(chunk) = self.level.get_chunk(chunk_pos) {
+                    println!("got chunk");
                     let mesh = full_mesh(
                         &self.level.asset_registry,
                         &ChunkBoundary::<BlockData, BlockRegistry>::new(

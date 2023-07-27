@@ -18,3 +18,15 @@ ahash = "0.8.3"
 ggegui = "0.3.6"
 itertools = "0.11.0"
 
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+debug = true # Remember to change this
+opt-level = 3
+lto = true #Change this to be per platform windows doesn't seem to like it
+
+
