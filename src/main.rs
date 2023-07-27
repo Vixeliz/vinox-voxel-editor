@@ -1,7 +1,7 @@
 use ggez::conf::NumSamples;
 use ggez::graphics::{
-    Camera3d, Canvas3d, DrawParam, DrawParam3d, ImageFormat, Mesh3d, Mesh3dBuilder, Rect, Sampler,
-    Vertex3d,
+    Aabb, Camera3d, Canvas3d, DrawParam, DrawParam3d, ImageFormat, Mesh3d, Mesh3dBuilder, Rect,
+    Sampler, Vertex3d,
 };
 use ggez::graphics::{Image, Shader};
 use ggez::input::keyboard::KeyCode;
@@ -17,6 +17,83 @@ use std::collections::HashMap;
 use std::{env, path};
 use vinox_voxel::prelude::*;
 use vinox_voxel_formats::level::VoxelLevel;
+
+/// A plane defined by a normal and distance value along the normal
+/// Any point p is in the plane if n.p = d
+/// For planes defining half-spaces such as for frusta, if n.p > d then p is on the positive side of the plane.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Plane {
+    pub normal_d: Vec4,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Frustum {
+    pub planes: [Plane; 6],
+}
+
+impl Frustum {
+    // NOTE: This approach of extracting the frustum planes from the view
+    // projection matrix is from Foundations of Game Engine Development 2
+    // Rendering by Lengyel. Slight modification has been made for when
+    // the far plane is infinite but we still want to cull to a far plane.
+    pub fn from_view_projection(
+        view_projection: &Mat4,
+        view_translation: &Vec3,
+        view_backward: &Vec3,
+        far: f32,
+    ) -> Self {
+        let row3 = view_projection.row(3);
+        let mut planes = [Plane::default(); 6];
+        for (i, plane) in planes.iter_mut().enumerate().take(5) {
+            let row = view_projection.row(i / 2);
+            plane.normal_d = if (i & 1) == 0 && i != 4 {
+                row3 + row
+            } else {
+                row3 - row
+            }
+            .normalize();
+        }
+        let far_center = *view_translation - far * *view_backward;
+        planes[5].normal_d = view_backward
+            .extend(-view_backward.dot(far_center))
+            .normalize();
+        Self { planes }
+    }
+
+    // pub fn intersects_sphere(&self, sphere: &Sphere) -> bool {
+    //     for plane in &self.planes {
+    //         if plane.normal_d.dot(sphere.center.extend(1.0)) + sphere.radius <= 0.0 {
+    //             return false;
+    //         }
+    //     }
+    //     true
+    // }
+
+    pub fn intersects_obb(&self, aabb: &Aabb, model_to_world: &Mat4) -> bool {
+        let aabb_center_world = *model_to_world * Vec3::from(aabb.center).extend(1.0);
+        let axes = [
+            Vec3A::from(model_to_world.x_axis),
+            Vec3A::from(model_to_world.y_axis),
+            Vec3A::from(model_to_world.z_axis),
+        ];
+        for plane in &self.planes {
+            let p_normal = Vec3A::from(plane.normal_d);
+            let half_extents = Vec3A::from(aabb.half_extents);
+            let relative_radius = Vec3A::new(
+                p_normal.dot(axes[0]),
+                p_normal.dot(axes[1]),
+                p_normal.dot(axes[2]),
+            )
+            .abs()
+            .dot(half_extents);
+            // let relative_radius = aabb.relative_radius(&p_normal, &axes);
+            if plane.normal_d.dot(aabb_center_world) + relative_radius <= 0.0 {
+                return false;
+            }
+        }
+        true
+    }
+}
 
 struct MainState {
     camera: Camera3d,
@@ -288,7 +365,7 @@ impl MainState {
             psx_shader: graphics::ShaderBuilder::from_path("/psx.wgsl")
                 .build(&ctx.gfx)
                 .unwrap(),
-            psx: true,
+            psx: false,
             texture_atlas,
             chunk_meshes,
             level,
@@ -435,11 +512,31 @@ impl event::EventHandler for MainState {
         };
         canvas3d.set_projection(self.camera.to_matrix());
         canvas3d.set_sampler(Sampler::nearest_clamp());
+        let frustum = Frustum::from_view_projection(
+            &Mat4::from(self.camera.to_matrix()),
+            &Vec3::from(self.camera.transform.position),
+            &(Quat::from_euler(
+                EulerRot::XYZ,
+                self.camera.transform.pitch,
+                self.camera.transform.yaw,
+                0.0,
+            ) * Vec3::Z),
+            self.camera.projection.zfar,
+        );
         for chunk_mesh in self.chunk_meshes.iter() {
-            canvas3d.draw(
-                &chunk_mesh.0,
-                DrawParam3d::default().position(chunk_mesh.1.as_vec3() * CHUNK_SIZE as f32),
-            );
+            let param = DrawParam3d::default().position(chunk_mesh.1.as_vec3() * CHUNK_SIZE as f32);
+            if chunk_mesh.0.aabb.is_some_and(|x| {
+                frustum.intersects_obb(
+                    &Aabb {
+                        center: (Vec3::from(x.center)).into(),
+                        // half_extents: x.half_extents,
+                        half_extents: Vec3::ONE.into(),
+                    },
+                    &Mat4::from(param.transform.to_bare_matrix()),
+                )
+            }) {
+                canvas3d.draw(&chunk_mesh.0, param);
+            }
         }
         canvas3d.finish(ctx)?;
         let mut canvas = graphics::Canvas::from_frame(ctx, None);
