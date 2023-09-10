@@ -6,17 +6,18 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-# ggez = { git = "https://github.com/vixeliz/ggez", branch = "devel" }
-ggez = { path = "../ggez" }
+ggez = { git = "https://github.com/vixeliz/ggez", branch = "devel" }
+# ggez = { path = "../ggez" }
 mint = "0.5.9"
 vinox_voxel = { git = "https://github.com/vixeliz/vinox_voxel" }
 vinox-voxel-formats = { path = "../vinox-voxel-formats" }
 # vinox-voxel-formats = { git = "https://github.com/vixeliz/vinox-voxel-formats" }
-# ggez_atlas = { git = "https://github.com/vixeliz/ggez_atlas" }
-ggez_atlas = { path = "../ggez_atlas" }
+ggez_atlas = { git = "https://github.com/vixeliz/ggez_atlas" }
+# ggez_atlas = { path = "../ggez_atlas" }
 ahash = "0.8.3"
 ggegui = "0.3.6"
 itertools = "0.11.0"
+bracket-noise = "~0.8"
 
 [profile.dev]
 opt-level = 1

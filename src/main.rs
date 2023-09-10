@@ -1,3 +1,4 @@
+use bracket_noise::prelude::*;
 use ggez::conf::NumSamples;
 use ggez::graphics::{
     Aabb, Camera3d, Canvas3d, DrawParam, DrawParam3d, ImageFormat, Mesh3d, Mesh3dBuilder, Rect,
@@ -17,7 +18,6 @@ use std::collections::HashMap;
 use std::{env, path};
 use vinox_voxel::prelude::*;
 use vinox_voxel_formats::level::VoxelLevel;
-
 /// A plane defined by a normal and distance value along the normal
 /// Any point p is in the plane if n.p = d
 /// For planes defining half-spaces such as for frusta, if n.p > d then p is on the positive side of the plane.
@@ -283,58 +283,44 @@ impl MainState {
         // // asset_registry.texture_uvs;
         let cloned = level.clone();
         for (idx, chunk) in level.loaded_chunks.as_mut().unwrap().iter_mut().enumerate() {
+            let mut noise = FastNoise::seeded(0);
+            noise.set_noise_type(NoiseType::SimplexFractal);
+            noise.set_fractal_octaves(8);
+            noise.set_frequency(0.005);
             let pos = cloned.delinearize(idx);
-            if pos.y == 0 {
-                for y in 0..3 {
-                    for x in 0..CHUNK_SIZE {
-                        for z in 0..CHUNK_SIZE {
-                            if y == 0 {
-                                chunk.set(
-                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                    BlockData::new("vinox".to_string(), "test".to_string()),
-                                );
-                            }
-                            if y == 2 && x == CHUNK_SIZE - 2
-                                || z == CHUNK_SIZE - 2
-                                || x == 1
-                                || z == 1
-                            {
-                                chunk.set(
-                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                    BlockData::new("vinox".to_string(), "test".to_string()),
-                                );
-                                continue;
-                            }
-                            if y == 1 && x < CHUNK_SIZE - 2 && z < CHUNK_SIZE - 2 && x > 1 && z > 1
-                            {
-                                chunk.set(
-                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                    BlockData::new("vinox".to_string(), "slab".to_string()),
-                                );
-                                continue;
-                            }
-                            if x == CHUNK_SIZE - 2 || z == CHUNK_SIZE - 2 || x == 1 || z == 1 {
-                                chunk.set(
-                                    RelativeVoxelPos::new(x as u32, y + 1, z as u32),
-                                    BlockData::new("vinox".to_string(), "test".to_string()),
-                                );
-                            }
+            for x in 0..CHUNK_SIZE {
+                for y in 0..CHUNK_SIZE {
+                    for z in 0..CHUNK_SIZE {
+                        let full_x = x as f32 + CHUNK_SIZE as f32 * pos.x as f32;
+                        let full_y = y as f32 + CHUNK_SIZE as f32 * pos.y as f32;
+                        let full_z = z as f32 + CHUNK_SIZE as f32 * pos.z as f32;
+                        let noise_val = noise.get_noise3d(full_x, 0.0, full_z) * 20.0;
+                        // println!("{:?}", noise_val);
+                        if full_y < 30.0 + noise_val {
+                            chunk.set(
+                                RelativeVoxelPos(UVec3::new(x as u32, y as u32, z as u32).into()),
+                                BlockData::new("vinox".to_string(), "test".to_string()),
+                            )
                         }
                     }
                 }
             }
         }
         for (idx, chunk) in level.loaded_chunks.as_ref().unwrap().iter().enumerate() {
+            let chunk_pos = level.delinearize(idx);
+            let chunk_neighbors = level
+                .get_chunk_neighbors_cloned(chunk_pos)
+                .unwrap_or_default();
             let mesh = full_mesh(
                 &asset_registry,
                 &ChunkBoundary::<BlockData, BlockRegistry>::new(
                     chunk.clone(),
-                    Default::default(),
+                    chunk_neighbors,
                     &registry,
                     &geo_table,
                     &asset_registry,
                 ),
-                IVec3::new(0, 0, 0).into(),
+                chunk_pos.as_ivec3().into(),
             );
 
             let vertices = izip!(
@@ -392,6 +378,114 @@ impl MainState {
     }
 }
 
+fn ggez_mesh_chunk(
+    level: &mut VoxelLevel,
+    chunk_pos: UVec3,
+    texture_atlas: &TextureAtlas<String>,
+    ctx: &mut Context,
+    chunk_meshes: &mut Vec<(Mesh3d, UVec3)>,
+) {
+    for chunk_pos in level.get_chunk_neighbors_pos(chunk_pos).unwrap().iter() {
+        if let Some(chunk_pos) = chunk_pos {
+            if let Some(chunk) = level.get_chunk(*chunk_pos) {
+                println!("got chunk");
+                let chunk_neighbors = level
+                    .get_chunk_neighbors_cloned(*chunk_pos)
+                    .unwrap_or_default();
+                let mesh = full_mesh(
+                    &level.asset_registry,
+                    &ChunkBoundary::<BlockData, BlockRegistry>::new(
+                        chunk.clone(),
+                        chunk_neighbors,
+                        &level.block_registry,
+                        &level.geometry_registry,
+                        &level.asset_registry,
+                    ),
+                    IVec3::new(0, 0, 0).into(),
+                );
+
+                let vertices = izip!(
+                    mesh.chunk_mesh.vertices,
+                    mesh.chunk_mesh.colors.unwrap(),
+                    mesh.chunk_mesh.uvs.unwrap(),
+                    mesh.chunk_mesh.normals
+                )
+                .map(|(pos, colors, uvs, normals)| {
+                    Vertex3d::new(
+                        mint::Vector3::from(pos),
+                        Vec2::from(uvs),
+                        Color::new(colors[0], colors[1], colors[2], colors[3]),
+                        mint::Vector3::from(normals),
+                    )
+                })
+                .collect();
+
+                let idx = level.linearize(*chunk_pos);
+
+                chunk_meshes[idx as usize] = (
+                    Mesh3dBuilder::new()
+                        .from_data(
+                            vertices,
+                            mesh.chunk_mesh.indices,
+                            Some(texture_atlas.image.clone()),
+                        )
+                        .build(ctx),
+                    *chunk_pos,
+                );
+            }
+        }
+    }
+    if let Some(chunk) = level.get_chunk(chunk_pos) {
+        println!("got chunk");
+        let chunk_neighbors = level
+            .get_chunk_neighbors_cloned(chunk_pos)
+            .unwrap_or_default();
+        let mesh = full_mesh(
+            &level.asset_registry,
+            &ChunkBoundary::<BlockData, BlockRegistry>::new(
+                chunk.clone(),
+                chunk_neighbors,
+                &level.block_registry,
+                &level.geometry_registry,
+                &level.asset_registry,
+            ),
+            IVec3::new(0, 0, 0).into(),
+        );
+
+        let vertices = izip!(
+            mesh.chunk_mesh.vertices,
+            mesh.chunk_mesh.colors.unwrap(),
+            mesh.chunk_mesh.uvs.unwrap(),
+            mesh.chunk_mesh.normals
+        )
+        .map(|(pos, colors, uvs, normals)| {
+            Vertex3d::new(
+                mint::Vector3::from(pos),
+                Vec2::from(uvs),
+                Color::new(colors[0], colors[1], colors[2], colors[3]),
+                mint::Vector3::from(normals),
+            )
+        })
+        .collect();
+
+        let idx = level.linearize(chunk_pos);
+
+        // self.chunk_meshes[idx as usize] = (
+        chunk_meshes[idx as usize] = (
+            Mesh3dBuilder::new()
+                .from_data(
+                    vertices,
+                    mesh.chunk_mesh.indices,
+                    Some(texture_atlas.image.clone()),
+                )
+                .build(ctx),
+            chunk_pos,
+        );
+        // chunk_pos.into(),
+        // );
+    }
+}
+
 impl event::EventHandler for MainState {
     fn resize_event(&mut self, _: &mut Context, width: f32, height: f32) -> GameResult {
         self.camera.projection.resize(width as u32, height as u32);
@@ -405,15 +499,16 @@ impl event::EventHandler for MainState {
         // set_cursor_grabbed(ctx, true)?;
         let k_ctx = &ctx.keyboard.clone();
         let (yaw_sin, yaw_cos) = self.camera.transform.yaw.sin_cos();
-        let (pitch_sin, _) = self.camera.transform.pitch.sin_cos();
+        let (pitch_sin, pitch_cos) = self.camera.transform.pitch.sin_cos();
         let dt = ctx.time.delta().as_secs_f32();
         let forward = Vec3::new(yaw_cos, 0.0, yaw_sin).normalize() * 25.0 * dt;
         let right = Vec3::new(-yaw_sin, 0.0, yaw_cos).normalize() * 25.0 * dt;
         if k_ctx.is_key_just_pressed(KeyCode::R) {
+            println!("Position: {:?}", self.camera.transform.position);
             println!("Key pressed");
             if let Some((voxel_pos, _, _)) = self.level.raycast(
                 self.camera.transform.position,
-                Vec3::new(yaw_cos, pitch_sin, yaw_sin),
+                Vec3::new(pitch_cos * yaw_cos, pitch_sin, pitch_cos * yaw_sin).normalize_or_zero(),
                 16.0,
             ) {
                 println!(
@@ -429,50 +524,61 @@ impl event::EventHandler for MainState {
                     (vox_pos.y as f32 / (CHUNK_SIZE as f32)).floor() as u32,
                     (vox_pos.z as f32 / (CHUNK_SIZE as f32)).floor() as u32,
                 );
+                ggez_mesh_chunk(
+                    &mut self.level,
+                    chunk_pos,
+                    &self.texture_atlas,
+                    ctx,
+                    &mut self.chunk_meshes,
+                );
 
-                if let Some(chunk) = self.level.get_chunk(chunk_pos) {
-                    println!("got chunk");
-                    let mesh = full_mesh(
-                        &self.level.asset_registry,
-                        &ChunkBoundary::<BlockData, BlockRegistry>::new(
-                            chunk.clone(),
-                            Default::default(),
-                            &self.level.block_registry,
-                            &self.level.geometry_registry,
-                            &self.level.asset_registry,
-                        ),
-                        IVec3::new(0, 0, 0).into(),
-                    );
+                // if let Some(chunk) = self.level.get_chunk(chunk_pos) {
+                //     println!("got chunk");
+                //     let chunk_neighbors = self
+                //         .level
+                //         .get_chunk_neighbors_cloned(chunk_pos)
+                //         .unwrap_or_default();
+                //     let mesh = full_mesh(
+                //         &self.level.asset_registry,
+                //         &ChunkBoundary::<BlockData, BlockRegistry>::new(
+                //             chunk.clone(),
+                //             chunk_neighbors,
+                //             &self.level.block_registry,
+                //             &self.level.geometry_registry,
+                //             &self.level.asset_registry,
+                //         ),
+                //         IVec3::new(0, 0, 0).into(),
+                //     );
 
-                    let vertices = izip!(
-                        mesh.chunk_mesh.vertices,
-                        mesh.chunk_mesh.colors.unwrap(),
-                        mesh.chunk_mesh.uvs.unwrap(),
-                        mesh.chunk_mesh.normals
-                    )
-                    .map(|(pos, colors, uvs, normals)| {
-                        Vertex3d::new(
-                            mint::Vector3::from(pos),
-                            Vec2::from(uvs),
-                            Color::new(colors[0], colors[1], colors[2], colors[3]),
-                            mint::Vector3::from(normals),
-                        )
-                    })
-                    .collect();
+                //     let vertices = izip!(
+                //         mesh.chunk_mesh.vertices,
+                //         mesh.chunk_mesh.colors.unwrap(),
+                //         mesh.chunk_mesh.uvs.unwrap(),
+                //         mesh.chunk_mesh.normals
+                //     )
+                //     .map(|(pos, colors, uvs, normals)| {
+                //         Vertex3d::new(
+                //             mint::Vector3::from(pos),
+                //             Vec2::from(uvs),
+                //             Color::new(colors[0], colors[1], colors[2], colors[3]),
+                //             mint::Vector3::from(normals),
+                //         )
+                //     })
+                //     .collect();
 
-                    let idx = self.level.linearize(chunk_pos);
+                //     let idx = self.level.linearize(chunk_pos);
 
-                    self.chunk_meshes[idx as usize] = (
-                        Mesh3dBuilder::new()
-                            .from_data(
-                                vertices,
-                                mesh.chunk_mesh.indices,
-                                Some(self.texture_atlas.image.clone()),
-                            )
-                            .build(ctx),
-                        chunk_pos.into(),
-                    );
-                }
+                //     self.chunk_meshes[idx as usize] = (
+                //         Mesh3dBuilder::new()
+                //             .from_data(
+                //                 vertices,
+                //                 mesh.chunk_mesh.indices,
+                //                 Some(self.texture_atlas.image.clone()),
+                //             )
+                //             .build(ctx),
+                //         chunk_pos.into(),
+                //     );
+                // }
             }
         }
         if k_ctx.is_key_pressed(KeyCode::Space) {
@@ -553,13 +659,7 @@ impl event::EventHandler for MainState {
         for chunk_mesh in self.chunk_meshes.iter() {
             let param = DrawParam3d::default().position(chunk_mesh.1.as_vec3() * CHUNK_SIZE as f32);
             if chunk_mesh.0.aabb.is_some_and(|x| {
-                frustum.intersects_obb(
-                    &Aabb {
-                        center: (Vec3::from(x.center)).into(),
-                        half_extents: x.half_extents,
-                    },
-                    &Mat4::from(param.transform.to_bare_matrix()),
-                )
+                frustum.intersects_obb(&x, &Mat4::from(param.transform.to_bare_matrix()))
             }) {
                 canvas3d.draw(&chunk_mesh.0, param);
             }
