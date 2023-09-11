@@ -103,6 +103,7 @@ struct MainState {
     texture_atlas: TextureAtlas<String>,
     level: VoxelLevel,
     chunk_meshes: Vec<(Mesh3d, UVec3)>,
+    cross_hair: Image,
 }
 
 impl MainState {
@@ -374,6 +375,7 @@ impl MainState {
             texture_atlas,
             chunk_meshes,
             level,
+            cross_hair: graphics::Image::from_path(ctx, "/crosshair.png")?,
         })
     }
 }
@@ -388,7 +390,6 @@ fn ggez_mesh_chunk(
     for chunk_pos in level.get_chunk_neighbors_pos(chunk_pos).unwrap().iter() {
         if let Some(chunk_pos) = chunk_pos {
             if let Some(chunk) = level.get_chunk(*chunk_pos) {
-                println!("got chunk");
                 let chunk_neighbors = level
                     .get_chunk_neighbors_cloned(*chunk_pos)
                     .unwrap_or_default();
@@ -436,7 +437,6 @@ fn ggez_mesh_chunk(
         }
     }
     if let Some(chunk) = level.get_chunk(chunk_pos) {
-        println!("got chunk");
         let chunk_neighbors = level
             .get_chunk_neighbors_cloned(chunk_pos)
             .unwrap_or_default();
@@ -668,8 +668,8 @@ impl event::EventHandler for MainState {
         let mut canvas = graphics::Canvas::from_frame(ctx, None);
 
         // Do 2d drawing
+        canvas.set_sampler(Sampler::nearest_clamp());
         if self.psx {
-            canvas.set_sampler(Sampler::nearest_clamp());
             let params = DrawParam::new().dest(Vec2::new(0.0, 0.0)).scale(Vec2::new(
                 ctx.gfx.drawable_size().0 / 320.0,
                 ctx.gfx.drawable_size().1 / 240.0,
@@ -678,10 +678,20 @@ impl event::EventHandler for MainState {
         }
         let dest_point1 = Vec2::new(10.0, 210.0);
         let dest_point2 = Vec2::new(10.0, 250.0);
+        let scale = 2.0;
+        let dest_point3 = Vec2::new(
+            (ctx.gfx.drawable_size().0 / 2.0) - (self.cross_hair.width() as f32 / 2.0) * scale,
+            (ctx.gfx.drawable_size().1 / 2.0) - (self.cross_hair.height() as f32 / 2.0) * scale,
+        );
 
         canvas.draw(
             &graphics::Text::new(format!("{}", ctx.time.fps())),
             dest_point1,
+        );
+
+        canvas.draw(
+            &self.cross_hair,
+            DrawParam::new().dest(dest_point3).scale(Vec2::splat(scale)),
         );
 
         canvas.draw(&self.texture_atlas.image, dest_point2);
